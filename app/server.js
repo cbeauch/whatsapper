@@ -1,11 +1,14 @@
 "use strict";
 
 const path = require("path");
+const QRCode = require("qrcode");
 const { MessageMedia } = require("whatsapp-web.js");
 const { client, getQr, isInitialized } = require("./whatsappClient");
+const { registerHockeyBot } = require("./hockeyBot");
 
 // web server configuration
 const fastify = require("fastify")({ logger: true });
+registerHockeyBot(fastify, client, isInitialized);
 
 fastify.register(require("@fastify/view"), {
   engine: {
@@ -18,8 +21,13 @@ fastify.get("/", function handler(_, reply) {
   reply.view("root.ejs");
 });
 
-fastify.get("/qr", function handler(_, reply) {
-  reply.view("qr.ejs", { qr: getQr() });
+fastify.get("/qr", async function handler(_, reply) {
+  const qr = getQr();
+  reply.header("Cache-Control", "no-store");
+  return reply.view("qr.ejs", {
+    qrImage: qr ? await QRCode.toDataURL(qr, { width: 360 }) : null,
+    ready: isInitialized(),
+  });
 });
 
 fastify.get("/chats", async function handler(_, reply) {
@@ -34,8 +42,9 @@ fastify.get("/chats", async function handler(_, reply) {
     }));
     return reply.view("chats.ejs", { chats: chats });
   } catch (e) {
+    fastify.log.error({ err: e }, "Failed to load chats");
     reply.statusCode = 500;
-    reply.send({ error: e });
+    reply.send({ error: { name: e.name, message: e.message } });
   }
 });
 
@@ -85,7 +94,7 @@ fastify.post("/command/:type", async function handler(request, reply) {
   }
 });
 
-fastify.listen({ port: 3000, host: "0.0.0.0" }, (err) => {
+fastify.listen({ port: Number(process.env.PORT || 3000), host: process.env.HOST || "0.0.0.0" }, (err) => {
   if (err) {
     fastify.log.error(err);
     process.exit(1);

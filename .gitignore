@@ -29,3 +29,7 @@ profile-*
 .wwebjs_auth
 
 .env
+
+# Local tooling and Windows session data
+.local/
+data/

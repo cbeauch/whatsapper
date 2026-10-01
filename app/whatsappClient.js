@@ -1,5 +1,10 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
+const path = require("path");
+
+const dataRoot = process.platform === "win32"
+  ? path.join(__dirname, "..", "data")
+  : "/data";
 
 const client = new Client({
   puppeteer: {
@@ -14,10 +19,10 @@ const client = new Client({
     ],
   },
   authStrategy: new LocalAuth({
-    dataPath: process.env.WWEBJS_AUTH_PATH || "/data/.wwebjs_auth/",
+    dataPath: process.env.WWEBJS_AUTH_PATH || path.join(dataRoot, ".wwebjs_auth"),
   }),
   webVersionCache: {
-    path: process.env.WWEBJS_CACHE_PATH || "/data/.wwebjs_cache/",
+    path: process.env.WWEBJS_CACHE_PATH || path.join(dataRoot, ".wwebjs_cache"),
   },
 });
 
@@ -33,10 +38,19 @@ client.on("qr", (qr) => {
 
 client.on("ready", () => {
   clientInitialized = true;
+  receivedQr = null;
   console.log("Client is ready!");
 });
 
-client.initialize();
+client.on("disconnected", () => {
+  clientInitialized = false;
+  receivedQr = null;
+});
+
+client.initialize().catch((error) => {
+  console.error("WhatsApp initialization failed:", error);
+  process.exit(1);
+});
 
 module.exports = {
   client,

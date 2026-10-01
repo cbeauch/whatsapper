@@ -1,1 +1,22 @@
-<h2><a href="https://qrcode.show/<%= qr %>">Show qrcode</a></h2>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <% if (!ready) { %><meta http-equiv="refresh" content="10"><% } %>
+    <title>Link WhatsApp · Whatsapper</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 24px;">
+    <h1>Link WhatsApp</h1>
+    <% if (ready) { %>
+      <p>WhatsApp is connected. <a href="/chats">View chats</a>.</p>
+    <% } else if (qrImage) { %>
+      <p>On your phone, open WhatsApp → Linked devices → Link a device, then scan this code.</p>
+      <img src="<%= qrImage %>" width="360" height="360" alt="WhatsApp device-linking QR code" style="max-width: 100%; height: auto;">
+      <p>This page refreshes automatically to keep the code current.</p>
+    <% } else { %>
+      <p>Starting WhatsApp. The QR code will appear here shortly.</p>
+    <% } %>
+    <p><a href="/">Home</a></p>
+  </body>
+</html>

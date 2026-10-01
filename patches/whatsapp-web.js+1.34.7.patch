@@ -1,0 +1,175 @@
+diff --git a/node_modules/whatsapp-web.js/src/Client.js b/node_modules/whatsapp-web.js/src/Client.js
+--- a/node_modules/whatsapp-web.js/src/Client.js
++++ b/node_modules/whatsapp-web.js/src/Client.js
+@@ -1199,39 +1199,44 @@
+                     function: 'pollVoteTableMode.bulkUpsert',
+                 },
+                 async (module, origFunction, ...args) => {
+-                    const votes = await Promise.all(
+-                        args[0].map(async (vote) => {
+-                            const msgKey = vote.id;
+-                            const parentMsgKey = vote.pollUpdateParentKey;
+-                            const timestamp = vote.t / 1000;
+-                            const sender = vote.author ?? vote.from;
+-                            const senderUserJid = sender._serialized;
+-
+-                            let parentMessage = Msg.get(
+-                                parentMsgKey._serialized,
+-                            );
+-                            if (!parentMessage) {
+-                                const fetched = await Msg.getMessagesById([
+-                                    parentMsgKey._serialized,
+-                                ]);
+-                                parentMessage = fetched?.messages?.[0] || null;
+-                            }
+-
+-                            return {
+-                                ...vote,
+-                                msgKey,
+-                                sender,
+-                                parentMsgKey,
+-                                senderUserJid,
+-                                timestamp,
+-                                parentMessage,
+-                            };
+-                        }),
+-                    );
+-
+-                    window.onPollVoteEvent(votes);
+-
+-                    return origFunction.apply(module, args);
++                    // Store incoming votes before notifying library consumers. A
++                    // renamed key or event error must never interrupt WhatsApp sync.
++                    const result = await origFunction.apply(module, args);
++                    try {
++                        const votes = await Promise.all(
++                            args[0].map(async (vote) => {
++                                const msgKey = vote.id;
++                                const parentMsgKey = vote.pollUpdateParentKey;
++                                const timestamp = vote.t / 1000;
++                                const sender = vote.author ?? vote.from;
++                                const senderUserJid = sender._serialized;
++                                const parentId = window.WWebJS.getMsgKeyId(parentMsgKey);
++
++                                let parentMessage = parentId ? Msg.get(parentId) : null;
++                                if (!parentMessage && parentId) {
++                                    const fetched = await Msg.getMessagesById([
++                                        parentId,
++                                    ]);
++                                    parentMessage = fetched?.messages?.[0] || null;
++                                }
++
++                                return {
++                                    ...vote,
++                                    msgKey,
++                                    sender,
++                                    parentMsgKey,
++                                    senderUserJid,
++                                    timestamp,
++                                    parentMessage,
++                                };
++                            }),
++                        );
++
++                        await window.onPollVoteEvent(votes);
++                    } catch (error) {
++                        console.warn('Poll vote event failed after storage:', error);
++                    }
++                    return result;
+                 },
+             );
+         });
+@@ -3407,13 +3412,20 @@
+             throw 'Invalid usage! Can only be used with a pollCreation message';
+ 
+         const pollVotes = await this.pupPage.evaluate(async (msg) => {
++            if (window.require('WAWebSocketModel').Socket.state !== 'CONNECTED') {
++                throw new Error('WhatsApp is not connected; poll votes may be stale.');
++            }
+             const msgKey = window
+                 .require('WAWebMsgKey')
+                 .fromString(msg.id._serialized);
++            const alternateKey = window
++                .require('WAWebLidMigrationUtils')
++                .getAlternateMsgKey(msgKey);
++            const parentKeys = [msgKey, alternateKey].filter(Boolean).map(String);
+             let pollVotes = await window
+                 .require('WAWebPollsVotesSchema')
+                 .getTable()
+-                .equals(['parentMsgKey'], msgKey.toString());
++                .anyOf(['parentMsgKey'], parentKeys);
+ 
+             return pollVotes.map((item) => {
+                 const typedArray = new Uint8Array(item.selectedOptionLocalIds);
+diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+--- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
++++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+@@ -582,7 +582,7 @@
+ 
+         return window
+             .require('WAWebCollections')
+-            .Msg.get(newMsgKey._serialized);
++            .Msg.get(window.WWebJS.getMsgKeyId(newMsgKey));
+     };
+ 
+     window.WWebJS.editMessage = async (msg, content, options = {}) => {
+@@ -625,7 +625,7 @@
+         await window
+             .require('WAWebSendMessageEditAction')
+             .sendMessageEdit(msg, content, internalOptions);
+-        return window.require('WAWebCollections').Msg.get(msg.id._serialized);
++        return window.require('WAWebCollections').Msg.get(window.WWebJS.getMsgKeyId(msg.id));
+     };
+ 
+     window.WWebJS.toStickerData = async (mediaInfo) => {
+@@ -832,6 +832,12 @@
+             msg.id = Object.assign({}, msg.id, {
+                 remote: msg.id.remote._serialized,
+             });
++        }
++
++        // WhatsApp Web can serialize message keys as $1 instead of _serialized.
++        const messageId = window.WWebJS.getMsgKeyId(msg.id);
++        if (messageId && !msg.id._serialized) {
++            msg.id = Object.assign({}, msg.id, { _serialized: messageId });
+         }
+ 
+         delete msg.pendingAckUpdate;
+@@ -917,6 +923,8 @@
+         };
+     };
+ 
++    window.WWebJS.getMsgKeyId = (key) => key?._serialized ?? key?.$1;
++
+     window.WWebJS.getChats = async () => {
+         const chats = window.require('WAWebCollections').Chat.getModelsArray();
+         const chatPromises = chats.map((chat) =>
+@@ -980,19 +988,15 @@
+         }
+ 
+         model.lastMessage = null;
+-        if (model.msgs && model.msgs.length) {
+-            const lastMessage = chat.lastReceivedKey
+-                ? window
+-                      .require('WAWebCollections')
+-                      .Msg.get(chat.lastReceivedKey._serialized) ||
+-                  (
+-                      await window
+-                          .require('WAWebCollections')
+-                          .Msg.getMessagesById([
+-                              chat.lastReceivedKey._serialized,
+-                          ])
+-                  )?.messages?.[0]
+-                : null;
++        const lastMessageId = window.WWebJS.getMsgKeyId(chat.lastReceivedKey);
++        if (model.msgs && model.msgs.length && lastMessageId) {
++            const lastMessage =
++                window.require('WAWebCollections').Msg.get(lastMessageId) ||
++                (
++                    await window
++                        .require('WAWebCollections')
++                        .Msg.getMessagesById([lastMessageId])
++                )?.messages?.[0];
+             lastMessage &&
+                 (model.lastMessage =
+                     window.WWebJS.getMessageModel(lastMessage));

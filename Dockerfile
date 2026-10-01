@@ -4,7 +4,8 @@ ADD app /workspace/app
 WORKDIR /workspace
 USER root
 COPY package*.json .
-RUN npm install
+COPY patches ./patches
+RUN npm ci --omit=dev
 EXPOSE 3000
 
 VOLUME /data
