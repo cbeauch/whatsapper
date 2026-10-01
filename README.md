@@ -66,6 +66,8 @@ docker compose ps
 Compose runs the locally built image at http://127.0.0.1:4010. The health check
 waits for WhatsApp to be ready; `/qr` shows the login screen if linking is needed.
 The service restarts automatically when Docker starts, unless explicitly stopped.
+Compose keeps a stable hostname so Chromium can recover its profile locks when
+the container is recreated during upgrades.
 Docker Desktop must be running. There is no automatic message-sending job in this
 container; the existing Windows task remains disabled and configured for dry runs.
 
@@ -171,6 +173,18 @@ Windows uses the project's `data/hockey-bot`. Set `HOCKEY_STATE_DIR` to override
 Keep this state when moving or reinstalling the bot to prevent duplicate polls.
 The WhatsApp library is pinned to the version matched by the compatibility patch,
 which is also copied and applied during Docker builds.
+
+The Docker image uses Node 24 and Debian's Chromium security packages. Local Node
+installs also require Node 24 or newer. Fastify and its view plugin use compatible
+v5/v12 releases. A scoped npm override selects Puppeteer 25.12.0 for WhatsApp to
+remove the vulnerable ZIP-extraction dependency in its pinned Puppeteer 24 tree;
+keep this override until upstream ships a compatible patched dependency.
+The unused `tap` dependency was removed; the tests use Node's built-in runner.
+
+After dependency updates, run `npm audit --omit=dev`, `npm test`, and build with
+`docker compose build --pull --no-cache` to refresh OS packages as well. Verify
+the login, poll reads, and a dry run before enabling any sending. A clean npm
+audit covers npm dependencies; it is not a complete container vulnerability scan.
 
 Run `node --test test/*.test.js` for the regression suite. Tests use a fake WhatsApp
 client and never connect to WhatsApp or send real messages. The old agent draft is

@@ -4,6 +4,7 @@ services:
     build:
       context: .
     container_name: whatsapper
+    hostname: whatsapper
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
