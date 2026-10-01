@@ -10,6 +10,23 @@ const { registerHockeyBot } = require("./hockeyBot");
 const fastify = require("fastify")({ logger: true });
 registerHockeyBot(fastify, client, isInitialized);
 
+fastify.get("/health", async (_, reply) => {
+  const ready = isInitialized();
+  return reply.code(ready ? 200 : 503).send({ whatsappReady: ready });
+});
+
+// Close Chromium cleanly so its persisted WhatsApp session survives container stops.
+fastify.addHook("onClose", async () => { await client.destroy(); });
+let stopping = false;
+async function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  try { await fastify.close(); }
+  catch (error) { fastify.log.error({ err: error }, "Shutdown failed"); process.exitCode = 1; }
+}
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
+
 fastify.register(require("@fastify/view"), {
   engine: {
     ejs: require("ejs"),

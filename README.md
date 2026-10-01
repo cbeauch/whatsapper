@@ -36,10 +36,13 @@ npm start
 Open http://localhost:3000/qr and scan the QR code from WhatsApp's
 **Linked devices → Link a device** screen. The page refreshes automatically.
 
-On Windows, run `./start.ps1` from PowerShell after installing dependencies.
-This starts the app at http://localhost:4010 (login at `/qr`). Login data is saved in the project's `data`
-directory, and Puppeteer's browser is stored in `.local/puppeteer`.
-Set `PORT` to use a different port, or `HOST` to choose a bind address.
+On Windows, `./start.ps1` now builds and starts Docker Compose at
+http://127.0.0.1:4010 (login at `/qr`); Docker Desktop must be running.
+For a local Node fallback, use `./start.ps1 -Local` after installing dependencies
+and stopping Docker. Local mode stores login data in the project's `data`
+directory and Puppeteer's browser in `.local/puppeteer`. Set `PORT` or `HOST` to
+override the local Node server address. See the migration notes below before
+switching back, so you retain the latest poll history.
 
 The local patch in `patches/whatsapp-web.js+1.34.7.patch` fixes chat loading
 when WhatsApp Web uses `$1` for message IDs instead of `_serialized`.
@@ -55,7 +58,32 @@ parent keys. Vote lookup refuses a disconnected WhatsApp session.
 
 ## Run with docker compose
 
-`docker compose up`
+```powershell
+docker compose up -d --build --wait --wait-timeout 180
+docker compose ps
+```
+
+Compose runs the locally built image at http://127.0.0.1:4010. The health check
+waits for WhatsApp to be ready; `/qr` shows the login screen if linking is needed.
+The service restarts automatically when Docker starts, unless explicitly stopped.
+Docker Desktop must be running. There is no automatic message-sending job in this
+container; the existing Windows task remains disabled and configured for dry runs.
+
+The `whatsapper_whatsapper` named volume contains the WhatsApp login, cached web
+client, and poll/reminder history under `/data`. These files are excluded from Git
+and Docker build contexts. Rebuilding or recreating the container preserves them.
+Keep the volume: `docker compose down -v` would erase the login and poll history.
+Source files are baked into the image, so use `docker compose up -d --build` after
+code changes. The CSV runner still reads the local `schedule.csv` and calls the
+same `127.0.0.1:4010` address from PowerShell.
+
+For the Windows-to-Docker migration, the local browser was closed before copying
+the project's `data` contents into the new named volume. The original local data
+and a backup under `.local/docker-migration-*` are retained. Run only one bot
+instance against the account. To return to the local app, first stop Compose,
+export the latest `/data` from the stopped container into the project's `data`
+folder, and then run `./start.ps1 -Local`. Local files are no longer updated with poll
+state while Docker is running; the named volume is the active source of truth.
 
 ## Bison Bot CSV schedule
 
